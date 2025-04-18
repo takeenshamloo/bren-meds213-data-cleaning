@@ -1,0 +1,130 @@
+---
+title: "EDS 213: Assignment 2"
+author: "Takeen Shamloo"
+format: html
+editor: source
+---
+
+#### Load Packages 
+
+```{r}
+#| message: false
+
+# Load packages.
+library(tidyverse)
+
+# Directory paths.
+datadir_raw      <- file.path("data", "raw")
+datadir_processed<- file.path("data", "processed")
+
+# Import the snow cleaned file produced in class.
+snow <- read_csv(file.path(datadir_processed, "snow_cover.csv"))
+
+glimpse(snow)
+```
+
+#### Explore Water_cover and Land_cover
+
+```{r}
+# Check Frequencies.
+snow |> count(Water_cover, sort = TRUE)
+snow |> count(Land_cover , sort = TRUE)
+
+# Which values still fail in water_cover.
+snow |> 
+  count(Water_cover) |>
+  filter(is.na(as.numeric(Water_cover)))
+
+# Which values still fail in land_cover.
+snow |> 
+  count(Land_cover) |>
+  filter(is.na(as.numeric(Land_cover)))
+```
+
+#### Cleaning Water_cover
+
+```{r}
+# Replace impossible codes (".", "-", "n/a", "unk") and "<1".
+snow <- snow |>
+  mutate(
+    Water_cover = ifelse(Water_cover == ".",   NA, Water_cover),
+    Water_cover = ifelse(Water_cover == "-",   NA, Water_cover),
+    Water_cover = ifelse(Water_cover == "n/a", NA, Water_cover),
+    Water_cover = ifelse(Water_cover == "unk", NA, Water_cover),
+    Water_cover = ifelse(Water_cover == "<1",  "0", Water_cover),
+    Water_cover = as.numeric(Water_cover),
+    Water_cover = ifelse(Water_cover < 0 | Water_cover > 100,
+                         NA, Water_cover)
+  )
+```
+
+#### Clean Land_cover
+
+```{r}
+# Replace impossible codes (".", "-", "n/a", "unk") and "<1".
+snow <- snow |>
+  mutate(
+    Land_cover = ifelse(Land_cover == ".",    NA, Land_cover),
+    Land_cover = ifelse(Land_cover == "-",    NA, Land_cover),
+    Land_cover = ifelse(Land_cover == "n/a",  NA, Land_cover),
+    Land_cover = ifelse(Land_cover == "unk",  NA, Land_cover),
+    Land_cover = ifelse(Land_cover == "<1",   "0", Land_cover),
+    Land_cover = as.numeric(Land_cover),
+    Land_cover = ifelse(Land_cover < 0 | Land_cover > 100,
+                        NA, Land_cover)
+  )
+```
+
+
+#### Compute `Total_cover`
+
+```{r}
+snow <- snow |> 
+  rowwise() |>
+  mutate(
+    
+    # Count how many of the three covers are NA in this row.
+    miss_n = sum(is.na(c_across(c(Snow_cover, Water_cover, Land_cover)))),
+    
+    # Sum of the non missing covers.
+    partial_sum = sum(c_across(c(Snow_cover, Water_cover, Land_cover)), na.rm = TRUE),
+    
+    # If Snow is the only missing value AND the other two sum <100. 
+    Snow_cover  = if_else(miss_n == 1 & is.na(Snow_cover) & partial_sum <= 100,
+                          100 - partial_sum, Snow_cover),
+    
+    # Same logic for Water.
+    Water_cover = if_else(miss_n == 1 & is.na(Water_cover) & partial_sum <= 100,
+                          100 - partial_sum, Water_cover),
+    
+    # Same logic for Land.
+    Land_cover  = if_else(miss_n == 1 & is.na(Land_cover) & partial_sum <= 100,
+                          100 - partial_sum, Land_cover)
+  ) |> 
+  ungroup() |>
+  select(-miss_n, -partial_sum) |> # Drop our helper cols. 
+
+  # If more than one value is still NA in the row, Total_cover will also be NA.
+  mutate(
+    Total_cover = if_else(
+      if_any(c(Snow_cover, Water_cover, Land_cover), is.na),
+      NA,
+      rowSums(across(c(Snow_cover, Water_cover, Land_cover)))
+    )
+  )
+```
+
+#### Output file
+
+Let's write the presence table to a csv file
+
+```{r}
+# Create directory at the given path. 
+dir.create(datadir_processed, showWarnings = FALSE)
+
+# Write df to csv.
+write_csv(
+  snow,
+  file.path(datadir_processed, "all_cover_fixed_TakeenShamloo.csv")
+)
+```
